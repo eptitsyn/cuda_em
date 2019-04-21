@@ -1,0 +1,248 @@
+PORTFOLIO_EX INFO ROBOT;
+DESCRIPTION Алгоритм забирает N баров с графика инструмента;
+CLIENTS_LIST  ALL_CLIENTS;
+FIRMS_LIST ALL_FIRMS;
+USE_CASE_SENSITIVE_CONSTANTS;
+
+
+PROGRAM
+   ' =========ПОЛЬЗОВАТЕЛЬСКИЕ НАСТРОЙКИ=============
+   INSTRUMENT="RTSI" ' код инструмента
+   CLASSCODE="INDX" ' код группы
+   NUMBER=1000 ' количество забираемых баров с графика
+   INTERVAL=60 ' таймфрейм на открытом графике в минутах (0 < INTERVAL < 60)
+  
+ ACCOUNT="L00-00000000" ' здесь вводится номер Вашего счёта на ММВБ
+   CLIENTCODE="00000" ' здесь вводится Ваш код клиента
+ 
+   ' ====================ПЕРЕМЕННЫЕ==================
+   HH = 0 ' обнуляем максимум за
+   LL = 10000000 '  обнуляем минимум за
+   Num_dn=4 '------- порядок вершин
+   Num_up=4 
+   ' ===============СЕРВЕРНЫЕ ДАТА И ВРЕМЯ===============
+   SERVERDATE=GET_INFO_PARAM("TRADEDATE")  ' дата сервера в формате DD.MM.YYYY
+   SERVERTIME=GET_INFO_PARAM("SERVERTIME") ' время сервера в формате HH:MM:SS
+   DATETIME (SERVERDATE,SERVERTIME) ' вызов функции даты-времени
+  
+   CURTIME=0+CURTIME ' перевод времени в число
+  
+   IF CURTIME > 100001 AND CURTIME < 235000 ' время внутри ТС
+            OHLC(1200) ' получаем коллекцию BARLIST с барами
+            BARCOUNT=GET_COLLECTION_COUNT(BARLIST) 'считаем количество баров в коллекции BARLIST  
+
+  	
+	'-----------реверс массива данных
+'	BARLIST_R=CREATE_COLLECTION() ' создаём список баров в виде MAP-массива
+'  	FOR I FROM 0 TO BARCOUNT
+'	BARLIST_R=INSERT_COLLECTION_ITEM(BARLIST_R,0,GET_COLLECTION_ITEM(BARLIST, I))' Поместили текущий бар в коллекцию
+'	END FOR
+'MESSAGE("Коллекция создана "&BARLIST&" Lowlast= "&GET_VALUE(GET_COLLECTION_ITEM(BARLIST_R, 1),"LOW"), 1)
+'---------------------- поиск ЧС
+RES=0
+RES_up=0
+
+
+
+           ' ===============ДАННЫЕ В ТАБЛИЦУ===============
+                     DELETE_ALL_ITEMS()
+ 
+                    OUTPUT=CREATE_MAP()
+		    CAN_CUR=CREATE_MAP()
+		    FOR I FROM 1 TO BARCOUNT-1
+			CAN_CUR=GET_COLLECTION_ITEM(BARLIST, I)
+                             OUTPUT=SET_VALUE(OUTPUT,"SERVERDATE" , GET_VALUE(CAN_CUR,"DATE"))
+                             OUTPUT=SET_VALUE(OUTPUT,"SERVERTIME" , GET_VALUE(CAN_CUR,"TIME"))
+                             OUTPUT=SET_VALUE(OUTPUT,"OPEN", GET_VALUE(CAN_CUR,"OPEN"))
+                             OUTPUT=SET_VALUE(OUTPUT,"HIGH", GET_VALUE(CAN_CUR,"HIGH"))
+                             OUTPUT=SET_VALUE(OUTPUT,"LOW", GET_VALUE(CAN_CUR,"LOW"))
+                             OUTPUT=SET_VALUE(OUTPUT,"CLOSE", GET_VALUE(CAN_CUR,"CLOSE"))
+
+                     ADD_ITEM(I,OUTPUT)
+  		    END FOR
+   END IF
+ 
+   ' ===============ФУНКЦИИ===============
+   ' ФУНКЦИЯ СЕРВЕРНЫХ ДАТЫ И ВРЕМЕНИ
+   FUNC DATETIME(FSERVERDATE,FSERVERTIME)
+            CURYEAR=SUBSTR(FSERVERDATE,6,4) ' текущий год в текстовом формате
+            CURMONTH=SUBSTR(FSERVERDATE,3,2) ' текущий месяц в текстовом формате
+            CURDAY=SUBSTR(FSERVERDATE,0,2) ' текущий день в текстовом формате
+            CURDATE(CURYEAR,CURMONTH,CURDAY) ' вызов функции перевода даты в текстовой формат
+           
+            CURHOUR=SUBSTR(FSERVERTIME,0,2) ' текущие часы в текстовом формате
+            CURMIN=SUBSTR(FSERVERTIME,3,2) ' текущие минуты в текстовом формате
+            CURSEC=SUBSTR(FSERVERTIME,6,2) ' текущие секунды в текстовом формате
+            CURTIME(CURHOUR,CURMIN,CURSEC) ' вызов функции перевода времени в текстовой формат
+   END FUNC
+ 
+   ' ФУНКЦИЯ ПЕРЕВОДА ДАТЫ В ТЕКСТОВОЙ ФОРМАТ
+   FUNC CURDATE (FCURYEAR,FCURMONTH,FCURDAY)
+            IF (LEN(FCURMONTH) < 2)
+                     CURMONTH = "0" & FCURMONTH
+            END IF
+            IF (LEN(FCURDAY) < 2)
+                    CURDAY = "0" & FCURDAY
+            END IF
+            CURDATE = CURYEAR & CURMONTH & CURDAY
+   END FUNC
+ 
+   ' ФУНКЦИЯ ПЕРЕВОДА ВРЕМЕНИ В ТЕКСТОВОЙ ФОРМАТ
+   FUNC CURTIME(FCURHOUR,FCURMIN,FCURSEC)
+            IF (LEN(FCURHOUR) < 2)
+                     CURHOUR = "0" & FCURHOUR
+            END IF
+            IF (LEN(FCURMIN) < 2)
+                     CURMIN = "0" & FCURMIN
+            END IF
+            CURTIME = CURHOUR & CURMIN & "00"
+   END FUNC
+  
+            ' ФУНКЦИЯ OHLC (забора N последних баров)
+   FUNC OHLC(FNUMBER)
+            IF INTERVAL<0 or INTERVAL>60
+                     MESSAGE("INTERVAL вне допустимого диапазона",1)
+                     RETURN
+            END IF
+            SERVERDATE=GET_INFO_PARAM("TRADEDATE")  ' дата сервера в формате DD.MM.YYYY
+            SERVERTIME=GET_INFO_PARAM("SERVERTIME") ' время сервера в формате HH:MM:SS
+            DATETIME (SERVERDATE, SERVERTIME) ' вызов функции даты-времени
+ 
+            CURMIN = INTERVAL*FLOOR(CURMIN/INTERVAL) ' округляем остаток до INTERVAL`а
+            BARLIST=CREATE_COLLECTION() ' создаём список баров в виде MAP-массива
+ 
+  
+           FOR I FROM 1 TO FNUMBER
+                    ' CURMIN=CURMIN-INTERVAL ' откат на интервал назад
+                     IF CURMIN<0
+                             CURMIN=60+CURMIN
+                             CURHOUR=CURHOUR-1
+                             IF CURHOUR<10
+                                      CURHOUR=23
+                                      CURDAY=CURDAY-1
+                                      IF CURDAY<1
+                                               CURMONTH=CURMONTH-1
+                                               IF (CURMONTH=1 OR CURMONTH=3 OR CURMONTH=5 OR CURMONTH=7 OR CURMONTH=8 OR CURMONTH=10 OR CURMONTH=12)
+                                                        CURDAY=31
+                                               END IF
+                                               IF (CURMONTH=4 OR CURMONTH=6 OR CURMONTH=9 OR CURMONTH=11)
+                                                        CURDAY=30
+                                               END IF
+                                               IF CURMONTH=2 ' еслимесяц- февраль
+                                                        MOD(CURYEAR,4) ' вызов функции остатка от деления
+                                                        IF RESULT = 0
+                                                                CURDAY=29 ' если год високосный
+                                                        ELSE
+                                                                CURDAY=28 ' если год не високосный
+                                                        END IF
+                                               END IF                                             
+                                               IF CURMONTH<1
+                                                        CURDAY=31
+                                                        CURMONTH=12
+                                                        CURYEAR=CURYEAR-1
+                                                        IF CURYEAR<0
+                                                                MESSAGE ("NO DATA",1)
+                                                                BREAK
+                                                        END IF
+                                               END IF
+                                      END IF
+                             END IF
+                     END IF
+                     CURDATE(CURYEAR,CURMONTH,CURDAY) ' перевод даты в текстовый формат
+                     CURTIME(CURHOUR,CURMIN,0) ' перевод времени в текстовый формат
+ 
+                     CANDLE=GET_CANDLE(CLASSCODE,INSTRUMENT, "", INTERVAL & "", "PRICE", CURDATE, CURTIME) ' получаем OHLC по CURDATE, CURTIME
+
+                     ' округление OPEN до второго знака после запятой и добавление в MAP-массив CANDLE
+
+ 
+                     OPEN=GET_VALUE (CANDLE, "OPEN")
+ 'MESSAGE("OHLC   Date = "&CURDATE&"  "&CURTIME&"  "&INSTRUMENT,1)					
+                     ROUND(OPEN,2)
+                     OPEN=0+RESULT
+                     CANDLE=SET_VALUE(CANDLE,"OPEN",OPEN)
+ 
+                     IF OPEN>0' свеча существует
+                             ' округление остальных цен до второго знака после запятой и добавление в MAP-массив CANDLE
+                             HIGH=GET_VALUE (CANDLE, "HIGH")
+                             ROUND(HIGH,2)
+                             HIGH=0+RESULT ' округлили HIGH до второго знака после запятой
+                             CANDLE=SET_VALUE(CANDLE,"HIGH",HIGH) ' добавили HIGH в MAP-массив
+                            
+                             LOW=GET_VALUE (CANDLE, "LOW")
+                             ROUND(LOW,2)
+                             LOW=0+RESULT ' округлили LOW до второго знака после запятой
+                             CANDLE=SET_VALUE(CANDLE,"LOW",LOW) ' добавили LOW в MAP-массив                     
+                            
+                             CLOSE=GET_VALUE (CANDLE, "CLOSE")
+                             ROUND(CLOSE,2)
+                             CLOSE=0+RESULT ' округлили CLOSE до второго знака после запятой
+                             CANDLE=SET_VALUE(CANDLE,"CLOSE",CLOSE) ' добавили CLOSE в MAP-массив
+			     
+							CANDLE=SET_VALUE(CANDLE,"DATE", CURDATE) ' добавили дату в MAP-массив
+							CANDLE=SET_VALUE(CANDLE,"TIME", CURTIME) ' добавилиC время в MAP-массив
+                            
+                             BARLIST=INSERT_COLLECTION_ITEM(BARLIST,0,CANDLE)' Поместили текущий бар в коллекцию
+                     END IF
+		     IF GET_COLLECTION_COUNT(BARLIST) > NUMBER '---- набрали нужное кол-во баров
+                             BREAK
+                             RETURN
+                     END IF
+	    CURMIN=CURMIN-INTERVAL ' откат на интервал назад
+            END FOR
+   END FUNC
+ 
+   ' ФУНКЦИЯ ДЕЛЕНИЯ С ОСТАТКОМ
+   FUNC MOD (NUM,DEN)
+            IF (0 + DEN = 0)
+                     RESULT = 0
+            ELSE
+                     CEL= FLOOR((NUM/DEN)) ' вычисляем частное без учёта остатка
+                     RESULT = NUM - (DEN*CEL)' вычисляем остаток
+            END IF
+   END FUNC
+ 
+   ' ФУНКЦИЯОКРУГЛЕНИЯ
+   FUNC ROUND (V,SCALE)
+            RESULT=APPLY_SCALE(V,SCALE)' передаём в функцию число для округления и разрядность округления
+   END FUNC
+ 
+END_PROGRAM
+ 
+PARAMETER SERVERDATE;
+PARAMETER_TITLE Дата;
+PARAMETER_DESCRIPTION Текущаядата;
+PARAMETER_TYPE STRING(10);
+END
+ 
+PARAMETER SERVERTIME;
+PARAMETER_TITLE Время;
+PARAMETER_DESCRIPTION Текущеевремя;
+PARAMETER_TYPE STRING(10);
+END
+ 
+PARAMETER OPEN;
+PARAMETER_TITLE Open;
+PARAMETER_DESCRIPTION цена открытия;
+PARAMETER_TYPE NUMERIC(6,4);
+END
+ 
+PARAMETER HIGH;
+PARAMETER_TITLE High;
+PARAMETER_DESCRIPTION максимум;
+PARAMETER_TYPE NUMERIC(6,4);
+END
+
+PARAMETER LOW;
+PARAMETER_TITLE Low;
+PARAMETER_DESCRIPTION минимум;
+PARAMETER_TYPE NUMERIC(6,4);
+END
+
+PARAMETER CLOSE;
+PARAMETER_TITLE Close;
+PARAMETER_DESCRIPTION цена закрытия;
+PARAMETER_TYPE NUMERIC(6,4);
+END
+ 
+END_PORTFOLIO_EX

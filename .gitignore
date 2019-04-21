@@ -1,0 +1,5 @@
+~$rsovik.docx
+kursovik_books/
+.ipynb_checkpoints/
+*.csv
+*.pdf
