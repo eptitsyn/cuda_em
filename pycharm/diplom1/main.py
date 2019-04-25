@@ -12,7 +12,6 @@ import pickle
 from numba import jit, cuda, float32, float64
 
 
-
 def set_initial_guess(xdata, k):
     np.random.seed(1234)
 # set pi mu sigma
@@ -30,26 +29,19 @@ def set_initial_guess(xdata, k):
     return pis, mus, sigmas
 
 @jit
-def em_alg_e_step(ws, n, data, pis, mus, sigmas):
-    for j in range(len(mus)):
-        for i in range(n):
-            #ws[j, i] = pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
-            ws[j, i] = pis[j] * (1./(math.sqrt(2*math.pi)*sigmas[j])*math.exp(-(data[i]-mus[j])**2/sigmas[j]**2))
-    ws /= ws.sum(0)
-    return ws
-
-def em_alg_decomposition(iter, data, k, pis, mus, sigmas):
-    tol = 0.01
-    max_iterations = 2
+def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterations = 2):
     n = len(data)
     # ем алг
     ll_old = 0
     ll_new = 0
-    for i in range(100):
-        #print('[{0}:{1}]EM iteration {2}'.format(iter,os.getpid(),i))
+    for i in range(max_iterations):
+        print('[{0}:{1}]EM iteration {2}'.format(iter,os.getpid(),i))
 # E step
         ws = np.zeros((k, n))
-        ws = em_alg_e_step(ws, n, data, pis, mus, sigmas)
+        for j in range(len(mus)):
+            for i in range(n):
+                ws[j, i] = pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
+        ws /= ws.sum(0)
 
 # M-step
         pis = np.zeros(k)
@@ -102,7 +94,7 @@ def func_star(a_b):
     """Convert `f([1,2])` to `f(1,2)` call."""
     return worker_task(*a_b)
 
-
+@jit
 def preparedatas():
     datas = []
     for x in range(len(a) - slswindowlen):
@@ -144,7 +136,4 @@ if __name__ == '__main__':
     result = pool.map(func_star, zip(range(len(datas)), datas, itertools.repeat(k), itertools.repeat(pis), itertools.repeat(mus), itertools.repeat(sigmas)))
 
     print(result)
-    serialized = pickle.dumps(result, protocol=0)
-
-    with open("Output.txt", "wb") as text_file:
-        text_file.write(serialized)
+    serialized = pickle.dump(result, open("Output1.txt", "wb"))
