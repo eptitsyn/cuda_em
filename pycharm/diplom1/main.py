@@ -9,6 +9,7 @@ import scipy.stats as sts
 import math
 import itertools
 import pickle
+import datetime
 from numba import jit, cuda, float32, float64
 
 
@@ -29,13 +30,13 @@ def set_initial_guess(xdata, k):
     return pis, mus, sigmas
 
 @jit
-def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterations = 2):
+def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterations = 100):
     n = len(data)
     # ем алг
     ll_old = 0
     ll_new = 0
     for i in range(max_iterations):
-        print('[{0}:{1}]EM iteration {2}'.format(iter,os.getpid(),i))
+        print('{3} [{0}:{1}]EM iteration {2}'.format(iter, os.getpid(), i, str(datetime.datetime.now())))
 # E step
         ws = np.zeros((k, n))
         for j in range(len(mus)):
@@ -84,9 +85,10 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
 
 
 def worker_task(iter, zdata, k, pis, mus, sigmas):
-    print("start worker {0}:{1}\n".format(iter, os.getpid()))
+    print("{2} start worker {0}:{1}\n".format(iter, os.getpid(), str(datetime.datetime.now())))
     pis, mus, sigmas = set_initial_guess(zdata, k)
     ll, pi, mu, sigma = em_alg_decomposition(iter, zdata, k, pis, mus, sigmas)
+    print("{2} end wkr {0}:{1}\n".format(iter, os.getpid(), str(datetime.datetime.now())))
     return [ll, pi, mu, sigma]
 
 
@@ -96,10 +98,11 @@ def func_star(a_b):
 
 @jit
 def preparedatas():
+    winlen = 1040
     datas = []
-    for x in range(len(a) - slswindowlen):
+    for x in range(len(df) - winlen):
         print(x)
-        xf = df.loc[df['<DATE>'].isin(a[x:x + slswindowlen])]
+        xf = df[x:x+winlen]
         data = np.array([])
         prevopen = 0
         for index, row in xf.iterrows():
@@ -119,14 +122,12 @@ if __name__ == '__main__':
     pool = Pool(processes=8)  # start 8 worker processes
 
 # init
-    df = pd.read_csv('RI.IMOEX_140101_140131.csv', sep=';')
+    df = pd.read_csv('RI.IMOEX_180323_180424_5min.csv', sep=';')
     # drop last from every day
-    df = df.groupby('<DATE>').apply(lambda x: x.iloc[:-1] if len(x) > 1 else x).reset_index(drop=True)
-    a = df['<DATE>'].unique()
+    df = df.groupby('<DATE>').apply(lambda x: x.iloc[:-2] if len(x) > 1 else x).reset_index(drop=True)
 
 # prepare data
     datas = preparedatas()
-
 
 # start
     k = 10
@@ -136,4 +137,4 @@ if __name__ == '__main__':
     result = pool.map(func_star, zip(range(len(datas)), datas, itertools.repeat(k), itertools.repeat(pis), itertools.repeat(mus), itertools.repeat(sigmas)))
 
     print(result)
-    serialized = pickle.dump(result, open("Output1.txt", "wb"))
+    serialized = pickle.dump(result, open("Output_180323_180424_5min.txt", "wb"))
