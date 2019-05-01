@@ -10,13 +10,9 @@ import mpl_toolkits.mplot3d.art3d as art3d
 
 #deserialized_a = pickle.load(open("Output22b.txt", "rb"))
 
-with open("Output22b.txt", 'rb') as f:
-    datas = pickle.load(f, encoding='latin1')
+with open("Output_180323_180424_5min.txt", 'rb') as f:
+    datas = pickle.load(f)
 
-
-del datas[212]
-del datas[211]
-del datas[179]
 
 
 def collapsedata(data, i, j):
@@ -32,7 +28,7 @@ def collapsedata(data, i, j):
     return data
 
 
-delta = 0.15
+delta = 0.05
 for idx, data in enumerate(datas):
     if not isinstance(data[0], numbers.Number):
         continue
@@ -58,12 +54,17 @@ for idx,data in enumerate(datas):
     for i in range(len(data[1])):
         if data[1][i]>treshold:
             addpoint(data,i, idx)
+
 """
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
+import matplotlib.cm as cm
+colors = cm.jet(np.linspace(0,1,101))
+maxz=max(z)
+
 for xi, yi, zi in zip(x, y, z):
-    line=art3d.Line3D(*zip((xi, yi, 0), (xi, yi, zi)), alpha=0.3, marker='o', markevery=(1, 1))
+    line=art3d.Line3D(*zip((xi, yi, 0), (xi, yi, zi)), color=colors[int(zi/maxz*100)], linewidth=0.1, alpha=0.5, marker='o', markevery=(1, 1))
     ax.add_line(line)
 ax.set_xlim3d(0, max(x))
 ax.set_ylim3d(0, max(y))
@@ -73,20 +74,22 @@ plt.draw()
 plt.show()
 """
 
-df = pd.read_csv('RI.IMOEX_180401_190401_daily.csv', sep=';')
-vol = df['<VOL>'].to_numpy()
-close = df['<CLOSE>'].to_numpy()
+"""
+#df = pd.read_csv('RI.IMOEX_180401_190401_daily.csv', sep=';')
+#vol = df['<VOL>'].to_numpy()
+#close = df['<CLOSE>'].to_numpy()
 
 plt.close('all')
 #plt.scatter(x, y, s=1)
 plt.scatter(x, mu, s=1)
 plt.show()
-""""
-f, axarr = plt.subplots(4, sharex=True)
-f.suptitle('Sharing X axis')
-axarr[0].scatter(x, y, 1, alpha=0.5, )
-axarr[1].scatter(x, mu, 1, alpha=0.5, )
-axarr[2].plot(range(257), vol)
-axarr[3].plot(range(257), close)
-plt.show()
 """
+
+f, axarr = plt.subplots(2, sharex=True)
+f.suptitle('Sharing X axis')
+axarr[0].scatter(x, y, 1, alpha=0.5, c=z, cmap="jet")
+axarr[1].scatter(x, mu, 1, alpha=0.5, )
+#axarr[2].plot(range(257), vol)
+#axarr[3].plot(range(257), close)
+plt.show()
+

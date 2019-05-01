@@ -10,14 +10,8 @@ import mpl_toolkits.mplot3d.art3d as art3d
 
 #deserialized_a = pickle.load(open("Output22b.txt", "rb"))
 
-with open("Output22b.txt", 'rb') as f:
+with open("Output_180323_180424_5min.txt", 'rb') as f:
     datas = pickle.load(f, encoding='latin1')
-
-
-del datas[212]
-del datas[211]
-del datas[179]
-
 
 def collapsedata(data, i, j):
     if (data[1][i] == 0) or (data[1][j]== 0):
@@ -63,5 +57,7 @@ for idx, data in enumerate(datas):
 x = np.arange(0, len(datas), 1)
 fig, ax = plt.subplots()
 ax.plot(x, vdiff)
-ax.plot(x, vdynn)
+
+ax2 = ax.twinx()
+ax2.plot(x, vdynn)
 plt.show()
