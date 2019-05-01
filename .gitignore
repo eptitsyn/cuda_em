@@ -5,3 +5,5 @@ kursovik_books/
 *.pdf
 ~$plom_1.docx
 pycharm/diplom1/.idea/
+*.txt
+*.txt_bkup
