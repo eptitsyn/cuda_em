@@ -7,3 +7,5 @@ kursovik_books/
 pycharm/diplom1/.idea/
 *.txt
 *.txt_bkup
+*.data
+pycharm/

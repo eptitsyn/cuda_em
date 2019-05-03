@@ -34,7 +34,6 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
     n = len(data)
     # ем алг
     ll_old = 0
-    ll_new = 0
     for i in range(max_iterations):
         print('{3} [{0}:{1}]EM iteration {2}'.format(iter, os.getpid(), i, str(datetime.datetime.now())))
 # E step
@@ -42,45 +41,47 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
         for j in range(len(mus)):
             for i in range(n):
                 ws[j, i] = pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
-        ws /= ws.sum(0)
-
-# M-step
-        pis = np.zeros(k)
-        for j in range(len(mus)):
-            for i in range(n):
-                pis[j] += ws[j, i]
-        pis /= n
-
-        mus = np.zeros(k)
-        for j in range(k):
-            for i in range(n):
-                mus[j] += ws[j, i] * data[i]
-            mus[j] /= ws[j, :].sum()
-
-        sigmas = np.zeros(k)
-        for j in range(k):
-            for i in range(n):
-                sigmas[j] += ws[j, i] * ((data[i] - mus[j]) ** 2)
-            sigmas[j] /= ws[j, :].sum()
-            sigmas[j] = math.sqrt(sigmas[j])
-
-        #print 'pis {0}'.format(pis)
-        #print 'mus {0}'.format(mus)
-        #print 'sigmas {0}'.format(sigmas)
 
         #
         # update complete log likelihoood
-        ll_new = 0.0
-        for i in range(n):
-            s = 0
-            for j in range(k):
-                s += pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
-            ll_new += np.log(s)
 
+        ll_new = sum(np.log(ws.sum(0)))
         if np.abs(ll_new - ll_old) < tol:
             break
         # print 'll = {0}\n'.format(ll_new)
         ll_old = ll_new
+
+
+        ws /= ws.sum(0)
+# M-step
+        pis = np.zeros(k)
+        mus = np.zeros(k)
+        sigmas = np.zeros(k)
+
+        for j in range(len(mus)):
+            for i in range(n):
+                pis[j] += ws[j, i]
+
+
+
+        for j in range(k):
+            for i in range(n):
+                mus[j] += ws[j, i] * data[i]
+            mus[j] /= pis[j]
+
+
+        for j in range(k):
+            for i in range(n):
+                sigmas[j] += ws[j, i] * ((data[i] - mus[j]) ** 2)
+            sigmas[j] /= pis[j]
+            sigmas[j] = math.sqrt(sigmas[j])
+
+        pis /= n
+        #print 'pis {0}'.format(pis)
+        #print 'mus {0}'.format(mus)
+        #print 'sigmas {0}'.format(sigmas)
+
+
     return ll_new, pis, mus, sigmas
 
 
@@ -98,7 +99,7 @@ def func_star(a_b):
 
 @jit
 def preparedatas():
-    winlen = 1040
+    winlen = 312
     datas = []
     for x in range(len(df) - winlen):
         print(x)
@@ -137,4 +138,4 @@ if __name__ == '__main__':
     result = pool.map(func_star, zip(range(len(datas)), datas, itertools.repeat(k), itertools.repeat(pis), itertools.repeat(mus), itertools.repeat(sigmas)))
 
     print(result)
-    serialized = pickle.dump(result, open("Output_180323_180424_5min.txt", "wb"))
+    serialized = pickle.dump(result, open("Output_180323_180424_5min_win312.txt", "wb"))

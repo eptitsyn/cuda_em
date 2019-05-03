@@ -28,7 +28,7 @@ def collapsedata(data, i, j):
     return data
 
 
-delta = 0.05
+delta = 0.15
 for idx, data in enumerate(datas):
     if not isinstance(data[0], numbers.Number):
         continue
@@ -49,7 +49,7 @@ def addpoint(data,i,n):
     mu.append(data[2][i])
     return
 
-treshold = 0.1
+treshold = 0.01
 for idx,data in enumerate(datas):
     for i in range(len(data[1])):
         if data[1][i]>treshold:
