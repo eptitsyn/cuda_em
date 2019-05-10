@@ -256,46 +256,6 @@ __global__ void m_step(float* glob_data, int data_off, float* theta, int theta_o
 
 	if (j < w.height)
 	{
-		float* pi = &theta[theta_off];
-		float* mu = &theta[theta_off + k];
-		float* sigma = &theta[theta_off + 2 * k];
-		float* data = &glob_data[data_off];
-
-		float* ss = new float[w.width];
-		size_t ss_cnt = 0;
-		for (int i = 0; i < w.width; ++i)
-		{
-			if (y[i] == j) {
-				ss[ss_cnt] = GetElement(w, j, i);
-				ss_cnt++;
-			}
-		}
-		//sort ss
-		cdp_simple_quicksort(ss, 0, ss_cnt-1, 0);
-		//pis
-		pi[j] = v[j] / w.width;
-		//mu
-		if (v[j] % 2 == 0)
-		{
-			mu[j] = 0.5*(ss[v[j] / 2 - 1] + ss[v[j] / 2]);
-		}
-		else
-		{
-			mu[j] = ss[v[j] / 2];
-		}
-		//sigma
-		float bs = 0;
-		for (int i = 0; i < v[j]; ++i)
-		{
-			bs += abs(ss[i]-mu[j]);
-		}
-		bs /= v[j];
-		sigma[j] = M_SQPId2 * bs;
-	}
-
-	/*old
-	if (j < w.height)
-	{
 		pi[j] = 0;
 		mu[j] = 0;
 		sigma[j] = 0;
@@ -319,45 +279,6 @@ __global__ void m_step(float* glob_data, int data_off, float* theta, int theta_o
 			sigma[j] = sqrtf(sigma[j]);
 
 			pi[j] /= w.width;
-		}
-	}
-	*/
-}
-
-__global__ void s_step(Matrix w, int* y, float* random)
-{
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	int j = blockIdx.y * blockDim.y + threadIdx.y;
-	if (i < w.width)
-	{
-		float vv[k];
-		float sum = 0;
-		for (int j = 0; j < k; ++j)
-		{
-			vv[j]=GetElement(w, j, i);
-			sum += vv[j];
-		}
-		for (int j = 0; j < k; ++j)
-		{
-			vv[j] /= sum;
-		}
-		y[i] = multinom(random[i], vv, k);
-	}
-}
-
-__global__ void s_step2(Matrix w, int* y, int* v)
-{
-	int i = blockIdx.x * blockDim.x + threadIdx.x;
-	int j = blockIdx.y * blockDim.y + threadIdx.y;
-	if (j < w.height)
-	{
-		v[j] = 0;
-		for (int i = 0; i < w.width; ++i)
-		{
-			if (y[i] == j)
-			{
-				v[j]++;
-			}
 		}
 	}
 }
@@ -498,26 +419,10 @@ cudaError_t em_algorithm(float* d_data, int data_off, const int data_length, flo
 			break;
 		}
 		ll_old = ll_new;
-		cudaDeviceSynchronize();
 
 
 		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
-		//random
-		curandGenerateUniform(rand_gen, d_random, data_length);
-		//
-		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
-		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
-
-		int* h_v = (int*)malloc(k * sizeof(int));
-		cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
-		for (int i = 0; i < k; ++i)
-		{
-			cout << h_v[i] << ", ";
-		}
-		cout << endl;
-
 		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
-		cudaDeviceSynchronize();
 		if (debug)
 		{
 			cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost);
