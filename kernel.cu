@@ -15,9 +15,9 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 100
-#define TOLERANCE 0.000001
-#define DATA_LENGTH 1100
+#define MAX_ITERATIONS 500
+#define TOLERANCE 0.001
+#define DATA_LENGTH 2391
 #define WINDOW_LENGTH 1040
 
 static void HandleError(cudaError_t err,
@@ -544,7 +544,7 @@ int main()
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
-	const int generate_theta_each_step = 0;
+	const int generate_theta_each_step = 1;
 	/* 0 - генерировать одно нач приближение и копировать его во все итерации
 	 * 1 - генерировать нач прибл для всех итераций
 	 * 2 - использовать предыдущий результат как начальное приближение
