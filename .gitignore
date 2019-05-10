@@ -1,5 +1,7 @@
 ~$rsovik.docx
 kursovik_books/
+cuda/
+tesla/
 .ipynb_checkpoints/
 *.csv
 *.pdf
