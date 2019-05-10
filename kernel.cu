@@ -1,19 +1,28 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+#include <curand.h>
+#include <curand_kernel.h>
+
 #include <stdio.h>
 #include <cstdlib>
 #include <time.h>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <vector>
+#include <numeric>
+#include "qsort.cu"
 
 using namespace std;
 
 #define M_SQ2PI 2.506628274631000502416
+#define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 1000
+#define MAX_ITERATIONS 3
 #define TOLERANCE 0.000001
+#define DATA_LENGTH 1040
+#define WINDOW_LENGTH 1040
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -33,36 +42,55 @@ typedef struct
 {
 	int width;
 	int height;
-	double* elements;
+	float* elements;
 } Matrix;
 
 // Get a matrix element
-__device__ double GetElement(const Matrix A, int row, int col)
+__device__ float GetElement(const Matrix A, int row, int col)
 {
 	return A.elements[row * A.width + col];
 }
 
 // Set a matrix element
-__device__ void SetElement(Matrix A, int row, int col, double value)
+__device__ void SetElement(Matrix A, int row, int col, float value)
 {
 	A.elements[row * A.width + col] = value;
 }
 
-__device__ double* GetSubData(double* data, int i)
+__device__ float* GetSubData(float* data, int i)
 {
 	return &data[i];
 }
 
-double* readfromfile(const char* DATA_FILENAME, int data_length)
+__global__ void initCurand(curandState *state, unsigned long seed) {
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	curand_init(seed, idx, 0, &state[idx]);
+}
+
+
+__device__ int multinom(float r, float* p, int n)
+{
+	//float r = devrandomfloat();
+	float s = 0;
+	int i;
+	for (i = 0; i < n; ++i)
+	{
+		s += p[i];
+		if (s - r >= 0) break;
+	}
+	return i;
+}
+
+float* readfromfile(const char* DATA_FILENAME, int data_length)
 {
 	ifstream inFile;
 	inFile.open(DATA_FILENAME);
-		if (!inFile) {
-			cerr << "Unable to open file datafile";
-			exit(1);   // call system to stop
-		}
-	double *data = (double*)malloc(data_length * sizeof(double));
-	double x;
+	if (!inFile) {
+		cerr << "Unable to open file datafile";
+		exit(1);   // call system to stop
+	}
+	float *data = (float*)malloc(data_length * sizeof(float));
+	float x;
 	for (int i = 0; i < data_length; ++i)
 	{
 		inFile >> x;
@@ -72,38 +100,40 @@ double* readfromfile(const char* DATA_FILENAME, int data_length)
 	return data;
 };
 
-double std_dev(double* data,const int data_length)
+float std_dev(float* data, int data_length)
 {
-	double sum = 0;
+	float sum = 0;
 	for (int i = 0; i < data_length; ++i)
 	{
 		sum += data[i];
 	}
-	double mean = sum / (double)data_length;
-	double varsum = 0;
+	float mean = sum / (float)data_length;
+	float differ;
+	float varsum = 0;
 	for (int i = 0; i < data_length; ++i)
 	{
-		varsum += pow(data[i] - mean, 2);
+		differ = data[i] - mean;
+		varsum += pow(differ, 2);
 	}
-	double Variance = varsum / (double)data_length;
+	float Variance = varsum / (float)data_length;
 	return sqrt(Variance);
 }
 
-double randomdouble()
+float randomfloat()
 {
-	double r = (double)rand() / (double)RAND_MAX;
+	float r = (float)rand() / (float)RAND_MAX;
 	return r;
 }
 
 
-void set_initial_guess(double* data,const int data_length, double* theta)
+void set_initial_guess(float* data, int data_length, float* theta)
 {
 	//pi
 	for (int i = 0; i < k; ++i)
 	{
-		theta[i] = randomdouble() * 0.9 + 0.1;
+		theta[i] = randomfloat() * 0.9 + 0.1;
 	}
-	double tsum = 0;
+	float tsum = 0;
 	for (int i = 0; i < k; ++i)
 	{
 		tsum += theta[i];
@@ -125,16 +155,16 @@ void set_initial_guess(double* data,const int data_length, double* theta)
 	//sigma
 	for (int i = 0; i < k; ++i)
 	{
-		theta[i + k * 2] = (randomdouble() * 1.5 + 0.25) * std_dev(data, data_length);
+		theta[i + k * 2] = randomfloat() * 1.5 + 0.25 * std_dev(data, data_length);
 	}
 }
 
-__global__ void e_step1(double* glob_data, int data_off, double* theta, int theta_off, Matrix w)
+__global__ void e_step1(float* glob_data, int data_off, float* theta, int theta_off, Matrix w)
 {
-	double* pi = &theta[theta_off];
-	double* mu = &theta[theta_off + k];
-	double* sigma = &theta[theta_off + 2 * k];
-	double* data = &glob_data[data_off];
+	float* pi = &theta[theta_off];
+	float* mu = &theta[theta_off + k];
+	float* sigma = &theta[theta_off + 2 * k];
+	float* data = &glob_data[data_off];
 
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -157,7 +187,7 @@ __global__ void e_step2(Matrix w)
 
 	if (i < w.width)
 	{
-		double wsum = 0;
+		float wsum = 0;
 		for (int e = 0; e < w.height; ++e)
 		{
 			wsum += GetElement(w, e, i);
@@ -172,16 +202,98 @@ __global__ void e_step2(Matrix w)
 	}
 }
 
-__global__ void m_step(double* glob_data, int data_off, double* theta, int theta_off, Matrix w)
-{
-	double* pi = &theta[theta_off];
-	double* mu = &theta[theta_off + k];
-	double* sigma = &theta[theta_off + 2 * k];
-	double* data = &glob_data[data_off];
+//__device__ int compare(const void * a, const void * b)
+//{
+//	float fa = *(const float*)a;
+//	float fb = *(const float*)b;
+//	return (fa > fb) - (fa < fb);
+//}
 
+
+
+//__device__ int qpart(float* A, int lo, int hi)
+//{
+//	float pivot = A[lo + (hi - lo) / 2];
+//	int i = lo - 1;
+//	int j = hi + 1;
+//
+//	while(1)
+//	{
+//		i++;
+//		while (A[i]<pivot)
+//		{
+//			j--;
+//		}
+//		while (A[j]>pivot)
+//		{
+//			if (i >= j) return j;
+//		}
+//		float tmp = A[i];
+//		A[i] = A[j];
+//		A[j] = A[i];
+//	}
+//}
+//__device__ void q1sort(float* A, int lo, int hi)
+//{
+//	if (lo < hi)
+//	{
+//		int p = qpart(A, lo, hi);
+//		q1sort(A, lo, p);
+//		q1sort(A, p + 1, hi);
+//	}
+//}
+//
+//__device__ void quiksort(float* base, size_t num)
+//{
+//	q1sort(base, 0, num - 1);
+//}
+
+
+__global__ void m_step(float* glob_data, int data_off, float* theta, int theta_off, Matrix w, int* y, int* v)
+{
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
 
+	if (j < w.height)
+	{
+		float* pi = &theta[theta_off];
+		float* mu = &theta[theta_off + k];
+		float* sigma = &theta[theta_off + 2 * k];
+		float* data = &glob_data[data_off];
+
+		float* ss = new float[w.width];
+		size_t ss_cnt = 0;
+		for (int i = 0; i < w.width; ++i)
+		{
+			if (y[i] == j) {
+				ss[ss_cnt] = GetElement(w, j, i);
+				ss_cnt++;
+			}
+		}
+		//sort ss
+		cdp_simple_quicksort(ss, 0, ss_cnt-1, 0);
+		//pis
+		pi[j] = v[j] / w.width;
+		//mu
+		if (v[j] % 2 == 0)
+		{
+			mu[j] = 0.5*(ss[v[j] / 2 - 1] + ss[v[j] / 2]);
+		}
+		else
+		{
+			mu[j] = ss[v[j] / 2];
+		}
+		//sigma
+		float bs = 0;
+		for (int i = 0; i < v[j]; ++i)
+		{
+			bs += abs(ss[i]-mu[j]);
+		}
+		bs /= v[j];
+		sigma[j] = M_SQPId2 * bs;
+	}
+
+	/*old
 	if (j < w.height)
 	{
 		pi[j] = 0;
@@ -201,23 +313,62 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 
 			for (int e = 0; e < w.width; e++)
 			{
-				sigma[j] += GetElement(w, j, e) * pow(data[e] - mu[j], 2);
+				sigma[j] += GetElement(w, j, e) * powf(data[e] - mu[j], 2);
 			}
 			sigma[j] /= pi[j];
-			sigma[j] = sqrt(sigma[j]);
+			sigma[j] = sqrtf(sigma[j]);
 
 			pi[j] /= w.width;
 		}
 	}
+	*/
 }
 
-__global__ void compute_ll(Matrix w, double* ll, double* ll2)
+__global__ void s_step(Matrix w, int* y, float* random)
 {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
 	if (i < w.width)
 	{
-		double llsum = 0;
+		float vv[k];
+		float sum = 0;
+		for (int j = 0; j < k; ++j)
+		{
+			vv[j]=GetElement(w, j, i);
+			sum += vv[j];
+		}
+		for (int j = 0; j < k; ++j)
+		{
+			vv[j] /= sum;
+		}
+		y[i] = multinom(random[i], vv, k);
+	}
+}
+
+__global__ void s_step2(Matrix w, int* y, int* v)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int j = blockIdx.y * blockDim.y + threadIdx.y;
+	if (j < w.height)
+	{
+		v[j] = 0;
+		for (int i = 0; i < w.width; ++i)
+		{
+			if (y[i] == j)
+			{
+				v[j]++;
+			}
+		}
+	}
+}
+
+__global__ void compute_ll(Matrix w, float* ll, float* ll2)
+{
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int j = blockIdx.y * blockDim.y + threadIdx.y;
+	if (i < w.width)
+	{
+		float llsum = 0;
 		for (int e = 0; e < w.height; e++)
 		{
 			llsum += GetElement(w, e, i);
@@ -227,9 +378,9 @@ __global__ void compute_ll(Matrix w, double* ll, double* ll2)
 	}
 }
 
-__global__ void compute_ll2(Matrix w, double* ll)
+__global__ void compute_ll2(Matrix w, float* ll)
 {
-	double llsum = 0;
+	float llsum = 0;
 	for (int e = 0; e < w.width; e++)
 	{
 		llsum += ll[e];
@@ -238,23 +389,34 @@ __global__ void compute_ll2(Matrix w, double* ll)
 }
 
 
-cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, double* d_theta, int theta_offset, double* h_theta, bool debug)
+cudaError_t em_algorithm(float* d_data, int data_off, const int data_length, float* d_theta, int theta_offset, float* h_theta,  bool debug)
 {
-	double* d_theta_loc = &d_theta[theta_offset];
-	double* h_theta_loc = &h_theta[theta_offset];
-	//size_t theta_size = ((data_length - window_size) / window_step )* 3 * k * sizeof(double);
-	size_t theta_loc_size = 3 * k * sizeof(double);
+	float* d_theta_loc = &d_theta[theta_offset];
+	float* h_theta_loc = &h_theta[theta_offset];
+	//size_t theta_size = ((data_length - window_size) / window_step )* 3 * k * sizeof(float);
+	size_t theta_loc_size = 3 * k * sizeof(float);
 	Matrix d_W;
 	d_W.width = data_length;
 	d_W.height = k;
-	HANDLE_ERROR(cudaMalloc(&d_W.elements, d_W.width * d_W.height * sizeof(double)));
+	HANDLE_ERROR(cudaMalloc(&d_W.elements, d_W.width * d_W.height * sizeof(float)));
 
-	double* d_ll;
-	double* d_ll2;
-	double* h_ll = (double*)malloc(sizeof(double) * data_length);
-	double* h_ll2 = (double*)malloc(sizeof(double) * data_length);
-	HANDLE_ERROR(cudaMalloc(&d_ll, data_length * sizeof(double)));
-	HANDLE_ERROR(cudaMalloc(&d_ll2, data_length * sizeof(double)));
+	float* d_ll;
+	float* d_ll2;
+	float* h_ll = (float*)malloc(sizeof(float) * data_length);
+	float* h_ll2 = (float*)malloc(sizeof(float) * data_length);
+	HANDLE_ERROR(cudaMalloc(&d_ll, data_length * sizeof(float)));
+	HANDLE_ERROR(cudaMalloc(&d_ll2, data_length * sizeof(float)));
+
+	curandGenerator_t rand_gen;
+	curandCreateGenerator(&rand_gen, CURAND_RNG_PSEUDO_DEFAULT);
+	curandSetPseudoRandomGeneratorSeed(rand_gen, time(NULL));
+
+	int *d_y, *d_v;
+	float *d_random, *d_ss;
+	HANDLE_ERROR(cudaMalloc(&d_random, data_length * sizeof(float)));
+	HANDLE_ERROR(cudaMalloc(&d_ss, k * sizeof(float)));
+	HANDLE_ERROR(cudaMalloc(&d_y, data_length * sizeof(int)));
+	HANDLE_ERROR(cudaMalloc(&d_v, data_length * sizeof(int)));
 
 	dim3 dimBlock(16, k);
 	dim3 dimGrid(data_length / dimBlock.x + 1, 1);
@@ -268,7 +430,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	dim3 dimGridLL(data_length / dimBlockLL.x + 1, 1);
 
 
-	double ll_old = 0;
+	float ll_old = 0;
 	for (int i = 0; i < MAX_ITERATIONS; i++)
 	{
 		//printf("iter = %d, ", i);
@@ -278,10 +440,10 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 		compute_ll2 << <1, 1 >> >(d_W, d_ll);
 		cudaDeviceSynchronize();
 
-		HANDLE_ERROR(cudaMemcpy(h_ll, d_ll, data_length * sizeof(double), cudaMemcpyDeviceToHost));
-		HANDLE_ERROR(cudaMemcpy(h_ll2, d_ll2, data_length *sizeof(double), cudaMemcpyDeviceToHost));
+		HANDLE_ERROR(cudaMemcpy(h_ll, d_ll, data_length * sizeof(float), cudaMemcpyDeviceToHost));
+		HANDLE_ERROR(cudaMemcpy(h_ll2, d_ll2, data_length *sizeof(float), cudaMemcpyDeviceToHost));
 
-		double ll_new = h_ll[0];
+		float ll_new = h_ll[0];
 
 		/*if (!isnormal(ll_new))
 		{
@@ -300,7 +462,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 		//printf("ll = %f;\n", ll_new);
 		if (isnan(ll_new))
 		{
-			HANDLE_ERROR(cudaMemcpy(h_theta_loc, d_theta_loc, 3*k* sizeof(double), cudaMemcpyDeviceToHost));
+			HANDLE_ERROR(cudaMemcpy(h_theta_loc, d_theta_loc, 3*k* sizeof(float), cudaMemcpyDeviceToHost));
 			for (int i = 0; i < k * 3; ++i)
 			{
 				printf("%f, ", h_theta_loc[i]);
@@ -318,8 +480,8 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 			Matrix h_W;
 			h_W.width = data_length;
 			h_W.height = k;
-			h_W.elements = (double*)malloc(h_W.width * h_W.height * sizeof(double));
-			cudaMemcpy(h_W.elements, d_W.elements, d_W.width * d_W.height * sizeof(double), cudaMemcpyDeviceToHost);
+			h_W.elements = (float*)malloc(h_W.width * h_W.height * sizeof(float));
+			cudaMemcpy(h_W.elements, d_W.elements, d_W.width * d_W.height * sizeof(float), cudaMemcpyDeviceToHost);
 
 			for (int i = 0; i < data_length * k * 3; i++)
 			{
@@ -340,7 +502,21 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 
 
 		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
-		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W);
+		//random
+		curandGenerateUniform(rand_gen, d_random, data_length);
+		//
+		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
+		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
+
+		int* h_v = (int*)malloc(k * sizeof(int));
+		cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
+		for (int i = 0; i < k; ++i)
+		{
+			cout << h_v[i] << ", ";
+		}
+		cout << endl;
+
+		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
 		cudaDeviceSynchronize();
 		if (debug)
 		{
@@ -363,7 +539,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	return cudaSuccess;
 }
 
-__global__ void copythetatonext(double *theta, int theta_offset, int theta_length)
+__global__ void copythetatonext(float *theta, int theta_offset, int theta_length)
 {
 		for (int j = theta_offset; j < theta_offset+theta_length; ++j)
 		{
@@ -371,15 +547,15 @@ __global__ void copythetatonext(double *theta, int theta_offset, int theta_lengt
 		}
 }
 
-cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta, const int window_size, const int window_step, const int generate_theta_each_step)
+cudaError_t slsalgorithm(float* h_data, const int data_length, float* h_theta, const int window_size, const int window_step, const int generate_theta_each_step)
 {
-	double* d_data = 0;
-	double* d_theta = 0;
+	float* d_data = 0;
+	float* d_theta = 0;
 	int theta_offset = 0;
 	int data_off = 0;
 
-	const int steps = (data_length - window_size + 1 ) / window_step;
-	size_t theta_size = (steps * k * 3 * sizeof(double));
+	const int steps = (data_length - window_size + 1) / window_step;
+	size_t theta_size = (steps * k * 3 * sizeof(float));
 
 
 	cudaError_t cudaStatus = cudaSetDevice(0);
@@ -390,7 +566,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 	}
 
 	HANDLE_ERROR(cudaMalloc(&d_theta, theta_size));
-	HANDLE_ERROR(cudaMalloc(&d_data, data_length * sizeof(double)));
+	HANDLE_ERROR(cudaMalloc(&d_data, data_length * sizeof(float)));
 
 	///
 	//set inint guess
@@ -425,7 +601,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 
 	cudaDeviceSynchronize();
 	HANDLE_ERROR(cudaMemcpy(d_theta, h_theta, theta_size, cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_data, h_data, data_length * sizeof(double), cudaMemcpyHostToDevice));
+	HANDLE_ERROR(cudaMemcpy(d_data, h_data, data_length * sizeof(float), cudaMemcpyHostToDevice));
 	/*for (int i = 0; i < k * 3 * steps; ++i)
 	{
 		h_theta[i] = 0;
@@ -464,55 +640,43 @@ Error:
 	return cudaStatus;
 }
 
-void savetofile(double* theta, int size)
+void savetofile(float* theta, int size)
 {
-	ofstream ofile ("output.data");
+	ofstream ofile("output.data");
 	if (ofile.is_open())
-  	{
-  		for (int i = 0; i < size; ++i)
-  		{
-  			for (int j = 0; j < k * 3; ++j)
-				{
-					ofile <<  theta[i * k * 3 + j] << ", ";
-				}
-			if (i != size-1)
-				ofile << endl;
-  		}
-    	ofile.close();
-	}
- 	else
-  	cout << "Unable to open file";
-	/*
-	FILE* f = fopen("output.data", "w");
-	for (int i = 0; i < size; ++i)
 	{
-		for (int j = 0; j < k * 3; ++j)
+		for (int i = 0; i < size; ++i)
 		{
-			fprintf(f, "%f, ", theta[i * k * 3 + j]);
+			for (int j = 0; j < k * 3; ++j)
+			{
+				ofile << theta[i * k * 3 + j] << ", ";
+			}
+			if (i != size - 1)
+				ofile << endl;
 		}
-		fprintf(f, "\n");
+		ofile.close();
 	}
-	fclose(f);
-	*/
+	else
+		cout << "Unable to open file";
 }
 
 int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 2391;
-	const char* data_filename = "../data/data_imoex_180323_180424_5min.txt";
-	const int window_length = 1040;
+	const int data_length = DATA_LENGTH;
+	const char* data_filename = "d://tmp//base_2.txt";
+	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
-	const int generate_theta_each_step = 1;
+	const int generate_theta_each_step = 0;
 	/* 0 - генерировать одно нач приближение и копировать его во все итерации
 	 * 1 - генерировать нач прибл для всех итераций
 	 * 2 - использовать предыдущий результат как начальное приближение
 	 */
 	const int steps = (data_length - window_length + 1) / window_step;
 
-	double* data = readfromfile(data_filename, data_length);
-	double* theta = (double*)malloc(steps * 3 * k * sizeof(double));
+	auto data = readfromfile(data_filename, data_length);
+	float* theta = (float*)malloc(steps * 3 * k * sizeof(float));
 
 	cudaError_t cudaStatus = slsalgorithm(data, data_length, theta, window_length, window_step, generate_theta_each_step);
 	if (cudaStatus != cudaSuccess)
