@@ -19,8 +19,8 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 200
-#define TOLERANCE 0.0001
+#define MAX_ITERATIONS 10
+#define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
 
 static void HandleError(cudaError_t err,
@@ -158,6 +158,10 @@ void set_initial_guess(double* data, int data_length, double* theta)
 	}
 }
 
+__device__ double normpdf(double data, double mu, double sigma){
+	return exp(-(pow(data - mu, 2)) / (2 * pow(sigma, 2))) / (M_SQ2PI * sigma);
+}
+
 __global__ void e_step1(double* glob_data, int data_off, double* theta, int theta_off, Matrix w)
 {
 	double* pi = &theta[theta_off];
@@ -171,7 +175,7 @@ __global__ void e_step1(double* glob_data, int data_off, double* theta, int thet
 	if (i < w.width && j < w.height)
 		if (sigma[j] != 0)
 		{
-			SetElement(w, j, i, pi[j] * exp(-(pow(data[i] - mu[j], 2)) / (2 * pow(sigma[j], 2))) / (M_SQ2PI * sigma[j]));
+			SetElement(w, j, i, pi[j] * normpdf(data[i], mu[j], sigma[j]) );
 		}
 		else
 		{
@@ -371,18 +375,21 @@ __global__ void s_step2(Matrix w, int* y, int* v)
 	}
 }
 
-__global__ void compute_ll(Matrix w, double* ll, double* ll2)
+__global__ void compute_ll(double* glob_data, int data_off, double* theta, int theta_off, Matrix w, int* y, int* v, double* ll, double* ll2)
 {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
+
 	if (i < w.width)
 	{
-		double llsum = 0;
-		for (int e = 0; e < w.height; e++)
-		{
-			llsum += GetElement(w, e, i);
-		}
-		ll[i] = log(llsum);
+		double* pi = &theta[theta_off];
+		double* mu = &theta[theta_off + k];
+		double* sigma = &theta[theta_off + 2 * k];
+		double* data = &glob_data[data_off];
+
+		int jj = y[j];
+		double llsum = pi[jj] * normpdf(data[i], mu[jj], sigma[jj]);
+		ll[i] = log( llsum );
 		ll2[i] = llsum;
 	}
 }
@@ -441,10 +448,29 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	double ll_old = 0;
 	for (int i = 0; i < MAX_ITERATIONS; i++)
 	{
-		//printf("iter = %d, ", i);
+		printf("iter = %d, ", i);
 		e_step1 << <dimGrid, dimBlock >> >(d_data, data_off, d_theta, theta_offset, d_W);
+		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
+		//random
+		curandGenerateUniformDouble(rand_gen, d_random, data_length);
+		//
+		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
+		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
 
-		compute_ll << <dimGridLL, dimBlockLL >> >(d_W, d_ll, d_ll2);
+		int* h_v = (int*)malloc(k * sizeof(int));
+		// cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
+		// for (int i = 0; i < k; ++i)
+		// {
+		// 	cout << h_v[i] << ", ";
+		// }
+		// cout << endl;
+
+		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
+		cudaDeviceSynchronize();
+
+//(double* glob_data, int data_off, double* theta, int theta_off, Matrix w, int* y, int* v double* ll, double* ll2)
+
+		compute_ll << <dimGridLL, dimBlockLL >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v, d_ll, d_ll2);
 		compute_ll2 << <1, 1 >> >(d_W, d_ll);
 		cudaDeviceSynchronize();
 
@@ -454,6 +480,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 
 		double ll_new = h_ll[0];
 
+		printf("ll = %f;\n", ll_new);
 		/*if (!isnormal(ll_new))
 		{
 			cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost);
@@ -509,24 +536,6 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 		ll_old = ll_new;
 		cudaDeviceSynchronize();
 
-
-		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
-		//random
-		curandGenerateUniformDouble(rand_gen, d_random, data_length);
-		//
-		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
-		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
-
-		int* h_v = (int*)malloc(k * sizeof(int));
-		// cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
-		// for (int i = 0; i < k; ++i)
-		// {
-		// 	cout << h_v[i] << ", ";
-		// }
-		// cout << endl;
-
-		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
-		cudaDeviceSynchronize();
 		if (debug)
 		{
 			cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost);
@@ -676,7 +685,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 2391;
+	const int data_length = 1100;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
