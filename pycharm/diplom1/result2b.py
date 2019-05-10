@@ -75,8 +75,11 @@ for idx, data in enumerate(datas):
 
 x = np.arange(0, len(datas), 1)
 fig, ax = plt.subplots()
-ax.plot(x, vdiff)
+diffc = ax.plot(x, vdiff, label='Diffuse')
 
 ax2 = ax.twinx()
-ax2.plot(x, vdynn)
+dynnc = ax2.plot(x, vdynn, color='g', label='Dynamic')
+lns = diffc+dynnc
+labs = [l.get_label() for l in lns]
+ax.legend(lns, labs, loc=0)
 plt.show()

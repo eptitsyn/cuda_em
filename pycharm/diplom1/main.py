@@ -10,6 +10,7 @@ import math
 import itertools
 import pickle
 import datetime
+import math
 from numba import jit, cuda, float32, float64
 
 
@@ -35,13 +36,17 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
     # ем алг
     ll_old = 0
     for i in range(max_iterations):
-        print('{3} [{0}:{1}]EM iteration {2}'.format(iter, os.getpid(), i, str(datetime.datetime.now())))
+        #print('{3} [{0}:{1}]EM iteration {2}'.format(iter, os.getpid(), i, str(datetime.datetime.now())))
 # E step
         ws = np.zeros((k, n))
         for j in range(len(mus)):
             for i in range(n):
-                ws[j, i] = pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
-
+                if sigmas[j] != 0:
+                    ws[j, i] = pis[j] * sts.norm(mus[j], sigmas[j]).pdf(data[i])
+                elif mus[j]-data[i] == 0:
+                    ws[j, i] = pis[j]
+                else:
+                    ws[j, i] = 0
         #
         # update complete log likelihoood
 
@@ -51,8 +56,9 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
         # print 'll = {0}\n'.format(ll_new)
         ll_old = ll_new
 
-
-        ws /= ws.sum(0)
+        b = ws.sum(0)
+        ws = np.divide(ws, b, out=np.zeros_like(ws), where=b!=0)
+        #ws /= ws.sum(0)
 # M-step
         pis = np.zeros(k)
         mus = np.zeros(k)
@@ -61,26 +67,23 @@ def em_alg_decomposition(iter, data, k, pis, mus, sigmas, tol = 0.01, max_iterat
         for j in range(len(mus)):
             for i in range(n):
                 pis[j] += ws[j, i]
+        if pis[j] != 0:
+            for j in range(k):
+                for i in range(n):
+                    mus[j] += ws[j, i] * data[i]
+                mus[j] /= pis[j]
+            for j in range(k):
+                for i in range(n):
+                    sigmas[j] += ws[j, i] * ((data[i] - mus[j]) ** 2)
+                sigmas[j] /= pis[j]
+                sigmas[j] = math.sqrt(sigmas[j])
 
+            pis /= n
+    #print('pis {0}'.format(pis))
+    #print('mus {0}'.format(mus))
+    #print('sigmas {0}'.format(sigmas))
 
-
-        for j in range(k):
-            for i in range(n):
-                mus[j] += ws[j, i] * data[i]
-            mus[j] /= pis[j]
-
-
-        for j in range(k):
-            for i in range(n):
-                sigmas[j] += ws[j, i] * ((data[i] - mus[j]) ** 2)
-            sigmas[j] /= pis[j]
-            sigmas[j] = math.sqrt(sigmas[j])
-
-        pis /= n
-        #print 'pis {0}'.format(pis)
-        #print 'mus {0}'.format(mus)
-        #print 'sigmas {0}'.format(sigmas)
-
+    print("{2} end wkr (iter={3}) {0}:{1}\n".format(iter, os.getpid(), str(datetime.datetime.now()), i))
 
     return ll_new, pis, mus, sigmas
 
@@ -89,7 +92,6 @@ def worker_task(iter, zdata, k, pis, mus, sigmas):
     print("{2} start worker {0}:{1}\n".format(iter, os.getpid(), str(datetime.datetime.now())))
     pis, mus, sigmas = set_initial_guess(zdata, k)
     ll, pi, mu, sigma = em_alg_decomposition(iter, zdata, k, pis, mus, sigmas)
-    print("{2} end wkr {0}:{1}\n".format(iter, os.getpid(), str(datetime.datetime.now())))
     return [ll, pi, mu, sigma]
 
 
@@ -99,9 +101,10 @@ def func_star(a_b):
 
 @jit
 def preparedatas():
-    winlen = 312
+    winlen = 336
     datas = []
-    for x in range(len(df) - winlen):
+    #for x in range(len(df) - winlen):
+    for x in range(178, 312):
         print(x)
         xf = df[x:x+winlen]
         data = np.array([])
@@ -116,12 +119,21 @@ def preparedatas():
         datas.append(data)
     return datas
 
+def preparedatas2(data):
+    winlen = 1040
+    winstep = 1
+    datas = []
+    for x in range(0, len(data)-winlen, winstep):
+        print(x/winstep)
+        datas.append(data[x:x+winlen])
+    return datas
+
 
 # main
 if __name__ == '__main__':
-    slswindowlen = 7
-    pool = Pool(processes=8)  # start 8 worker processes
+    pool = Pool(processes=16)  # start 8 worker processes
 
+    """
 # init
     df = pd.read_csv('RI.IMOEX_180323_180424_5min.csv', sep=';')
     # drop last from every day
@@ -129,6 +141,16 @@ if __name__ == '__main__':
 
 # prepare data
     datas = preparedatas()
+    """
+    f = open('d://tmp//base_2.txt', 'r')
+    x = f.readlines()
+    f.close()
+    data = []
+    for i in range(len(x)):
+        data = np.append(data, float(x[i][:-1]))
+
+    datas = preparedatas2(data)
+
 
 # start
     k = 10
@@ -138,4 +160,4 @@ if __name__ == '__main__':
     result = pool.map(func_star, zip(range(len(datas)), datas, itertools.repeat(k), itertools.repeat(pis), itertools.repeat(mus), itertools.repeat(sigmas)))
 
     print(result)
-    serialized = pickle.dump(result, open("Output_180323_180424_5min_win312.txt", "wb"))
+    serialized = pickle.dump(result, open("Output_test.txt", "wb"))

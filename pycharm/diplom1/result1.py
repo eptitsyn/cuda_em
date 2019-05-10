@@ -10,7 +10,7 @@ import mpl_toolkits.mplot3d.art3d as art3d
 
 #deserialized_a = pickle.load(open("Output22b.txt", "rb"))
 
-with open("Output_180323_180424_5min.txt", 'rb') as f:
+with open("Output_test.txt", 'rb') as f:
     datas = pickle.load(f)
 
 

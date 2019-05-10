@@ -10,7 +10,7 @@ import mpl_toolkits.mplot3d.art3d as art3d
 
 #deserialized_a = pickle.load(open("Output22b.txt", "rb"))
 
-with open("Output_180323_180424_5min.txt", 'rb') as f:
+with open("Output_180323_180424_5min_win312_2.txt", 'rb') as f:
     datas = pickle.load(f, encoding='latin1')
 
 def collapsedata(data, i, j):
@@ -56,8 +56,11 @@ for idx, data in enumerate(datas):
 
 x = np.arange(0, len(datas), 1)
 fig, ax = plt.subplots()
-ax.plot(x, vdiff)
+diffc = ax.plot(x, vdiff, label='Diffuse')
 
 ax2 = ax.twinx()
-ax2.plot(x, vdynn)
+dynnc = ax2.plot(x, vdynn, color='g', label='Dynamic')
+lns = diffc+dynnc
+labs = [l.get_label() for l in lns]
+ax.legend(lns, labs, loc=0)
 plt.show()
