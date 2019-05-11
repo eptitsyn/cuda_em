@@ -19,9 +19,10 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 100
+#define MAX_ITERATIONS 20
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
+#define DEBUG 1
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -276,7 +277,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 					sum += data[i];
 				}
 			}
-			mu[j] = sum/(double)v[j];
+			mu[j] = sum/((double)v[j]*pi[j]);
 			//sigma
 			sum =0;
 			for (int i = 0; i < w.height; ++i)
@@ -286,7 +287,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 					sum += pow(data[i]-mu[j],2);
 				}
 			}
-			sigma[j]=sqrt(sum/(double)v[j]);
+			sigma[j]=sqrt(sum/((double)v[j]*pi[j]));
 		} else {
 			pi[j] = 0;
 			mu[j] = 0;
@@ -376,8 +377,8 @@ __global__ void compute_ll(double* glob_data, int data_off, double* theta, int t
 		double* data = &glob_data[data_off];
 
 		int jj = y[j];
-		double llsum = pi[jj] * normpdf(data[i], mu[jj], sigma[jj]);
-		ll[i] = log( llsum );
+		double llsum = log(pi[jj] * normpdf(data[i], mu[jj], sigma[jj]));
+		ll[i] = llsum ;
 		ll2[i] = llsum;
 	}
 }
@@ -445,13 +446,17 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
 		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
 
-		int* h_v = (int*)malloc(k * sizeof(int));
-		// cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
-		// for (int i = 0; i < k; ++i)
-		// {
-		// 	cout << h_v[i] << ", ";
-		// }
-		// cout << endl;
+		if (debug)
+		{
+			int* h_v = (int*)malloc(k * sizeof(int));
+			cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
+			for (int i = 0; i < k; ++i)
+			{
+				cout << h_v[i] << ", ";
+			}
+			cout << endl;
+		}
+
 
 		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
 		cudaDeviceSynchronize();
@@ -630,7 +635,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 		printf("[%s] Start EM %d: \n", foo , i);
 		data_off = i * window_step;
 		theta_offset = i * k * 3;
-		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, false);
+		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, DEBUG);
 		if (generate_theta_each_step == 2 && i!=steps-1)
 		{
 			copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
@@ -673,7 +678,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 1200;
+	const int data_length = 1040;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
