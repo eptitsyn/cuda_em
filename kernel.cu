@@ -770,7 +770,10 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, h_data, DEBUG);
 		if (generate_theta_each_step == 2 && i!=steps-1)
 		{
-			copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
+			HANDLE_ERROR(cudaMemcpy(d_theta, h_theta, theta_size, cudaMemcpyHostToDevice));
+
+			HANDLE_ERROR(cudaMemcpy(h_theta, d_theta, theta_size, cudaMemcpyDeviceToHost));
+			//copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
 		}
 
 	}
