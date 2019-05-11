@@ -20,7 +20,7 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 100
+#define MAX_ITERATIONS 1000
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
 #define DEBUG 0
@@ -543,7 +543,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	double ll_old = 0;
 	for (int i = 0; i < MAX_ITERATIONS; i++)
 	{
-		printf("iter = %d, ", i);
+		if(DEBUG) printf("iter = %d, ", i);
 		e_step1 << <dimGrid, dimBlock >> >(d_data, data_off, d_theta, theta_offset, d_W);
 		cudaDeviceSynchronize();
 		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
@@ -605,7 +605,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 
 		double ll_new = h_ll[0];
 
-		printf("ll = %f;\n", ll_new);
+		if(DEBUG) printf("ll = %f;\n", ll_new);
 		/*if (!isnormal(ll_new))
 		{
 			cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost);
