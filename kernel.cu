@@ -19,7 +19,7 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 10
+#define MAX_ITERATIONS 100
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
 
@@ -265,40 +265,28 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 		double* sigma = &theta[theta_off + 2 * k];
 		double* data = &glob_data[data_off];
 		if(v[j] != 0){
-
-			double* ss = new double[w.width];
-			size_t ss_cnt = 0;
-			for (int i = 0; i < w.width; ++i)
-			{
-				if (y[i] == j) {
-					ss[ss_cnt] = GetElement(w, j, i);
-					ss_cnt++;
-				}
-			}
-
-			//sort ss
-			cdp_simple_quicksort<<<1,1>>>(ss, 0, ss_cnt-1, 0);
 			//pis
 			pi[j] = v[j] / (double)w.width;
-
 			//mu
-			if (v[j] % 2 == 0)
+			double sum = 0;
+			for (int i = 0; i < w.height; ++i)
 			{
-				mu[j] = 0.5*(ss[v[j] / 2 - 1] + ss[v[j] / 2]);
+				if(y[i]==j)
+				{
+					sum += data[i];
+				}
 			}
-			else
-			{
-				mu[j] = ss[v[j] / 2];
-			}
+			mu[j] = sum/(double)v[j];
 			//sigma
-			double bs = 0;
-			for (int i = 0; i < v[j]; ++i)
+			sum =0;
+			for (int i = 0; i < w.height; ++i)
 			{
-				bs += abs(ss[i]-mu[j]);
+				if(y[i]==j)
+				{
+					sum += pow(data[i]-mu[j],2);
+				}
 			}
-			bs /= v[j];
-			sigma[j] = M_SQPId2 * bs;
-			delete(ss);
+			sigma[j]=sqrt(sum/(double)v[j]);
 		} else {
 			pi[j] = 0;
 			mu[j] = 0;
@@ -685,7 +673,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 1100;
+	const int data_length = 1200;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
