@@ -23,6 +23,7 @@ using namespace std;
 #define MAX_ITERATIONS 10
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
+#define DEBUG 1
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -128,34 +129,55 @@ double randomdouble()
 
 void set_initial_guess(double* data, int data_length, double* theta)
 {
-	//pi
-	for (int i = 0; i < k; ++i)
+	if(!DEBUG)
 	{
-		theta[i] = randomdouble() * 0.9 + 0.1;
-	}
-	double tsum = 0;
-	for (int i = 0; i < k; ++i)
-	{
-		tsum += theta[i];
-	}
-	for (int i = 0; i < k; ++i)
-	{
-		theta[i] /= tsum;
-	}
-	/*
-	for (int i = 0; i < k; ++i)
-	{
-		theta[i] = theta[i] * 0.9 + 0.1;
-	}*/
-	//mu
-	for (int i = 0; i < k; ++i)
-	{
-		theta[i + k] = 0;
-	}
-	//sigma
-	for (int i = 0; i < k; ++i)
-	{
-		theta[i + k * 2] = randomdouble() * 1.5 + 0.25 * std_dev(data, data_length);
+		//pi
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i] = randomdouble() * 0.9 + 0.1;
+		}
+		double tsum = 0;
+		for (int i = 0; i < k; ++i)
+		{
+			tsum += theta[i];
+		}
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i] /= tsum;
+		}
+		/*
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i] = theta[i] * 0.9 + 0.1;
+		}*/
+		//mu
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i + k] = 0;
+		}
+		//sigma
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i + k * 2] = randomdouble() * 1.5 + 0.25 * std_dev(data, data_length);
+		}
+	} else {
+		//pi
+		double pi[10] = {0.05, 0.1, 0.08, 0.1, 0.1, 0.05, 0.05, 0.1, 0.2, 0.17};
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i] = pi[i];
+		}
+		//mu
+		for (int i = 0; i < k; ++i)
+		{
+			theta[i + k] = 0;
+		}
+		//sigma
+		double sigma[10] = {1.4, 1.7, 2.2, 2.3, 1.5, 1.9, 1.8, 0.5, 2.5, 2.8};
+		for (int i = 0; i < k; ++i)
+		{
+			theta[k*2+ i] = sigma[i];
+		}
 	}
 }
 
@@ -297,7 +319,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 			{
 				bs += abs(ss[i]-mu[j]);
 			}
-			bs /= v[j];
+			bs = bs/(double)v[j];
 			sigma[j] = M_SQPId2 * bs;
 			delete(ss);
 		} else {
@@ -451,21 +473,28 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	{
 		printf("iter = %d, ", i);
 		e_step1 << <dimGrid, dimBlock >> >(d_data, data_off, d_theta, theta_offset, d_W);
+		cudaDeviceSynchronize();
 		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
 		//random
 		curandGenerateUniformDouble(rand_gen, d_random, data_length);
 		//
 		s_step << <dimGridLL, dimBlockLL >> >(d_W, d_y, d_random);
+		cudaDeviceSynchronize();
 		s_step2<<<1, dimBlockM>>>(d_W, d_y, d_v);
+		cudaDeviceSynchronize();
 
-		int* h_v = (int*)malloc(k * sizeof(int));
-		// cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
-		// for (int i = 0; i < k; ++i)
-		// {
-		// 	cout << h_v[i] << ", ";
-		// }
-		// cout << endl;
-
+		if (debug)
+		{
+			cout << "v = ";
+			int* h_v = (int*)malloc(k * sizeof(int));
+			cudaMemcpy(h_v, d_v, k*sizeof(int), cudaMemcpyDeviceToHost);
+			for (int i = 0; i < k; ++i)
+			{
+				cout << h_v[i] << ", ";
+			}
+			cout << endl;
+		}
+		cudaDeviceSynchronize();
 		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
 		cudaDeviceSynchronize();
 
@@ -643,7 +672,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 		printf("[%s] Start EM %d: \n", foo , i);
 		data_off = i * window_step;
 		theta_offset = i * k * 3;
-		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, false);
+		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, DEBUG);
 		if (generate_theta_each_step == 2 && i!=steps-1)
 		{
 			copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
@@ -686,7 +715,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 1100;
+	const int data_length = 1040;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
