@@ -15,10 +15,11 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 500
-#define TOLERANCE 0.001
-#define DATA_LENGTH 2391
-#define WINDOW_LENGTH 1040
+#define MAX_ITERATIONS 200
+#define TOLERANCE 0.01
+#define DATA_LENGTH 26262
+#define WINDOW_LENGTH 672
+#define WINDOW_STEP 6
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -541,10 +542,10 @@ int main()
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
 	const int data_length = DATA_LENGTH;
-	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
+	const char* data_filename = "..//data//meteo_noaa_jfk_1731913.txt";
 	const int window_length = WINDOW_LENGTH;
-	const int window_step = 1;
-	const int generate_theta_each_step = 1;
+	const int window_step = WINDOW_STEP;
+	const int generate_theta_each_step = 0;
 	/* 0 - генерировать одно нач приближение и копировать его во все итерации
 	 * 1 - генерировать нач прибл для всех итераций
 	 * 2 - использовать предыдущий результат как начальное приближение
