@@ -19,7 +19,7 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 20
+#define MAX_ITERATIONS 200
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
 #define DEBUG 1
@@ -174,6 +174,7 @@ __global__ void e_step1(double* glob_data, int data_off, double* theta, int thet
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
 
 	if (i < w.width && j < w.height)
+	{
 		if (sigma[j] != 0)
 		{
 			SetElement(w, j, i, pi[j] * normpdf(data[i], mu[j], sigma[j]) );
@@ -182,6 +183,7 @@ __global__ void e_step1(double* glob_data, int data_off, double* theta, int thet
 		{
 			SetElement(w, j, i, data[i] == mu[j] ? pi[j] : 0);
 		}
+	}
 }
 
 __global__ void e_step2(Matrix w)
@@ -277,7 +279,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 					sum += data[i];
 				}
 			}
-			mu[j] = sum/((double)v[j]*pi[j]);
+			mu[j] = sum/(double)v[j];
 			//sigma
 			sum =0;
 			for (int i = 0; i < w.height; ++i)
@@ -287,7 +289,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 					sum += pow(data[i]-mu[j],2);
 				}
 			}
-			sigma[j]=sqrt(sum/((double)v[j]*pi[j]));
+			sigma[j]=sqrt(sum/(double)v[j]);
 		} else {
 			pi[j] = 0;
 			mu[j] = 0;
@@ -434,7 +436,7 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	dim3 dimGridLL(data_length / dimBlockLL.x + 1, 1);
 
 
-	double ll_old = 0;
+	double ll_old = -INFINITY;
 	for (int i = 0; i < MAX_ITERATIONS; i++)
 	{
 		printf("iter = %d, ", i);
