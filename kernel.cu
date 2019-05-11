@@ -20,10 +20,10 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 10
+#define MAX_ITERATIONS 100
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
-#define DEBUG 1
+#define DEBUG 0
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -48,6 +48,11 @@ typedef struct
 
 // Get a matrix element
 __device__ double GetElement(const Matrix A, int row, int col)
+{
+	return A.elements[row * A.width + col];
+}
+
+__host__ double GetElementH(const Matrix A, int row, int col)
 {
 	return A.elements[row * A.width + col];
 }
@@ -294,7 +299,7 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 			for (int i = 0; i < w.width; ++i)
 			{
 				if (y[i] == j) {
-					ss[ss_cnt] = GetElement(w, j, i);
+					ss[ss_cnt] = data[i];
 					ss_cnt++;
 				}
 			}
@@ -358,6 +363,71 @@ __global__ void m_step(double* glob_data, int data_off, double* theta, int theta
 		}
 	}
 	*/
+}
+
+int cmpfunc (const void * a, const void * b) {
+   return ( *(double*)a - *(double*)b );
+}
+
+//M step CPU.
+__host__ void m_step_cpu(double* glob_data, int data_off, double* theta, int theta_off, Matrix w, int* y, int* v)
+{
+	for (int j = 0; j<w.height; ++j)
+	{
+		double* pi = &theta[theta_off];
+		double* mu = &theta[theta_off + k];
+		double* sigma = &theta[theta_off + 2 * k];
+		double* data = &glob_data[data_off];
+		if(v[j] != 0){
+
+			double* ss = new double[w.width];
+			size_t ss_cnt = 0;
+			for (int i = 0; i < w.width; ++i)
+			{
+				if (y[i] == j) {
+					ss[ss_cnt] = data[i];
+					ss_cnt++;
+				}
+			}
+
+			//sort ss
+			//cdp_simple_quicksort<<<1,1>>>(ss, 0, ss_cnt-1, 0);
+			qsort(ss, ss_cnt, sizeof(double), cmpfunc);
+			cout << "ss= ";
+			for (int i = 0; i < ss_cnt; ++i)
+			{
+				cout << ss[i] << ", ";
+			}
+			cout << endl;
+
+			//pis
+			pi[j] = v[j] / (double)w.width;
+
+			//mu
+			if (v[j] % 2 == 0)
+			{
+				mu[j] = 0.5*(ss[v[j] / 2 - 1] + ss[v[j] / 2]);
+			}
+			else
+			{
+				mu[j] = ss[v[j] / 2];
+			}
+			//sigma
+			double bs = 0;
+			for (int i = 0; i < v[j]; ++i)
+			{
+				bs += abs(ss[i]-mu[j]);
+			}
+			bs = bs/(double)v[j];
+			cout << "bs={" << bs <<"}, ";
+			sigma[j] = M_SQPId2 * bs;
+			delete(ss);
+		} else {
+			pi[j] = 0;
+			mu[j] = 0;
+			sigma[j] = 0;
+		}
+	}
 }
 
 __global__ void s_step(Matrix w, int* y, double* random)
@@ -428,7 +498,7 @@ __global__ void compute_ll2(Matrix w, double* ll)
 }
 
 
-cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, double* d_theta, int theta_offset, double* h_theta,  bool debug)
+cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, double* d_theta, int theta_offset, double* h_theta, double* h_glob_data, bool debug)
 {
 	double* d_theta_loc = &d_theta[theta_offset];
 	double* h_theta_loc = &h_theta[theta_offset];
@@ -450,11 +520,13 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 	curandCreateGenerator(&rand_gen, CURAND_RNG_PSEUDO_DEFAULT);
 	curandSetPseudoRandomGeneratorSeed(rand_gen, time(NULL));
 
-	int *d_y, *d_v;
+	int *d_y, *d_v, *h_y, *h_v;
 	double *d_random;
 	HANDLE_ERROR(cudaMalloc(&d_random, data_length * sizeof(double)));
 	HANDLE_ERROR(cudaMalloc(&d_y, data_length * sizeof(int)));
 	HANDLE_ERROR(cudaMalloc(&d_v, data_length * sizeof(int)));
+	h_y = (int*) malloc(data_length*sizeof(int));
+	h_v = (int*) malloc(data_length*sizeof(int));
 
 	dim3 dimBlock(16, k);
 	dim3 dimGrid(data_length / dimBlock.x + 1, 1);
@@ -494,9 +566,32 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 			}
 			cout << endl;
 		}
-		cudaDeviceSynchronize();
-		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
-		cudaDeviceSynchronize();
+
+		if (0)
+		{
+			cudaDeviceSynchronize();
+			Matrix h_W;
+		 	h_W.width = data_length;
+		 	h_W.height = k;
+		 	h_W.elements = (double*)malloc(h_W.width * h_W.height * sizeof(double));
+		 	HANDLE_ERROR(cudaMemcpy(h_W.elements, d_W.elements, d_W.width * d_W.height * sizeof(double), cudaMemcpyDeviceToHost));
+			HANDLE_ERROR(cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost));
+			HANDLE_ERROR(cudaMemcpy(h_v, d_v, data_length*sizeof(int), cudaMemcpyDeviceToHost));
+			HANDLE_ERROR(cudaMemcpy(h_y, d_y, data_length*sizeof(int), cudaMemcpyDeviceToHost));
+			m_step_cpu(h_glob_data, data_off, h_theta_loc, 0, h_W, h_y, h_v);
+			cudaDeviceSynchronize();
+
+			HANDLE_ERROR(cudaMemcpy(d_W.elements, h_W.elements, d_W.width * d_W.height * sizeof(double), cudaMemcpyHostToDevice));
+			HANDLE_ERROR(cudaMemcpy(d_theta_loc, h_theta_loc, theta_loc_size, cudaMemcpyHostToDevice));
+			HANDLE_ERROR(cudaMemcpy(d_v, h_v, data_length*sizeof(int), cudaMemcpyHostToDevice));
+			HANDLE_ERROR(cudaMemcpy(d_y, h_y, data_length*sizeof(int), cudaMemcpyHostToDevice));
+		} else
+		{
+			cudaDeviceSynchronize();
+			m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W, d_y, d_v);
+		}
+
+
 
 //(double* glob_data, int data_off, double* theta, int theta_off, Matrix w, int* y, int* v double* ll, double* ll2)
 
@@ -672,7 +767,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 		printf("[%s] Start EM %d: \n", foo , i);
 		data_off = i * window_step;
 		theta_offset = i * k * 3;
-		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, DEBUG);
+		em_algorithm(d_data, data_off, window_size, d_theta, theta_offset, h_theta, h_data, DEBUG);
 		if (generate_theta_each_step == 2 && i!=steps-1)
 		{
 			copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
@@ -715,7 +810,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 1040;
+	const int data_length = 2391;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
