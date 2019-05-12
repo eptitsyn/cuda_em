@@ -20,7 +20,7 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 1000
+#define MAX_ITERATIONS 10000
 #define TOLERANCE 0.01
 #define WINDOW_LENGTH 1040
 #define DEBUG 0
@@ -687,10 +687,24 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 
 __global__ void copythetatonext(double *theta, int theta_offset, int theta_length)
 {
-		for (int j = theta_offset; j < theta_offset+theta_length; ++j)
-		{
-			theta[j+theta_length] = theta[j];
+	for (int j = theta_offset; j < theta_offset+theta_length; ++j)
+	{
+		theta[j+theta_length] = theta[j];
+	}
+}
+
+__host__ void copythetawithfill(double* theta, int theta_offset)
+{
+	for (int i = 0; i < k; ++i)
+	{
+		if(theta[theta_offset+i] != 0){
+			theta[theta_offset+k*3+i]=theta[theta_offset+i];
+			theta[theta_offset+k*4+i]=theta[theta_offset+k+i];
+			theta[theta_offset+k*5+i]=theta[theta_offset+k*2+i];
+		} else {
+
 		}
+	}
 }
 
 cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta, const int window_size, const int window_step, const int generate_theta_each_step)
@@ -771,7 +785,7 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 		if (generate_theta_each_step == 2 && i!=steps-1)
 		{
 			HANDLE_ERROR(cudaMemcpy(d_theta, h_theta, theta_size, cudaMemcpyHostToDevice));
-
+			copythetawithfill(h_theta, theta_offset);
 			HANDLE_ERROR(cudaMemcpy(h_theta, d_theta, theta_size, cudaMemcpyDeviceToHost));
 			//copythetatonext<<<1,1>>>(d_theta, theta_offset, k * 3);
 		}
@@ -813,7 +827,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 2391;
+	const int data_length = 1100;
 	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
