@@ -16,11 +16,11 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 200
+#define MAX_ITERATIONS 300
 #define TOLERANCE 0.01
-#define DATA_LENGTH 26262
-#define WINDOW_LENGTH 672
-#define WINDOW_STEP 6
+#define DATA_LENGTH 28080
+#define WINDOW_LENGTH 2600
+#define WINDOW_STEP 5
 
 static void HandleError(cudaError_t err,
                         const char* file,
@@ -121,11 +121,6 @@ void set_initial_guess(double* data, int data_length, double* theta)
 	{
 		theta[i] /= tsum;
 	}
-	/*
-	for (int i = 0; i < k; ++i)
-	{
-		theta[i] = theta[i] * 0.9 + 0.1;
-	}*/
 	//mu
 	for (int i = 0; i < k; ++i)
 	{
@@ -180,52 +175,6 @@ __global__ void e_step2(Matrix w)
 		}
 	}
 }
-
-//__device__ int compare(const void * a, const void * b)
-//{
-//	double fa = *(const double*)a;
-//	double fb = *(const double*)b;
-//	return (fa > fb) - (fa < fb);
-//}
-
-
-
-//__device__ int qpart(double* A, int lo, int hi)
-//{
-//	double pivot = A[lo + (hi - lo) / 2];
-//	int i = lo - 1;
-//	int j = hi + 1;
-//
-//	while(1)
-//	{
-//		i++;
-//		while (A[i]<pivot)
-//		{
-//			j--;
-//		}
-//		while (A[j]>pivot)
-//		{
-//			if (i >= j) return j;
-//		}
-//		double tmp = A[i];
-//		A[i] = A[j];
-//		A[j] = A[i];
-//	}
-//}
-//__device__ void q1sort(double* A, int lo, int hi)
-//{
-//	if (lo < hi)
-//	{
-//		int p = qpart(A, lo, hi);
-//		q1sort(A, lo, p);
-//		q1sort(A, p + 1, hi);
-//	}
-//}
-//
-//__device__ void quiksort(double* base, size_t num)
-//{
-//	q1sort(base, 0, num - 1);
-//}
 
 
 __global__ void m_step(double* glob_data, int data_off, double* theta, int theta_off, Matrix w)
@@ -393,9 +342,11 @@ cudaError_t em_algorithm(double* d_data, int data_off, const int data_length, do
 		}
 		ll_old = ll_new;
 
-
+		cudaDeviceSynchronize();
 		e_step2 << <dimGride2, dimBlocke2 >> >(d_W);
+		cudaDeviceSynchronize();
 		m_step << <1, dimBlockM >> >(d_data, data_off, d_theta, theta_offset, d_W);
+		cudaDeviceSynchronize();
 		if (debug)
 		{
 			cudaMemcpy(h_theta_loc, d_theta_loc, theta_loc_size, cudaMemcpyDeviceToHost);
@@ -480,10 +431,6 @@ cudaError_t slsalgorithm(double* h_data, const int data_length, double* h_theta,
 	cudaDeviceSynchronize();
 	HANDLE_ERROR(cudaMemcpy(d_theta, h_theta, theta_size, cudaMemcpyHostToDevice));
 	HANDLE_ERROR(cudaMemcpy(d_data, h_data, data_length * sizeof(double), cudaMemcpyHostToDevice));
-	/*for (int i = 0; i < k * 3 * steps; ++i)
-	{
-		h_theta[i] = 0;
-	}*/
 	/*
 	 *
 	 */
@@ -543,7 +490,7 @@ int main()
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
 	const int data_length = DATA_LENGTH;
-	const char* data_filename = "..//data//meteo_noaa_jfk_1731913.txt";
+	const char* data_filename = "..//data//RI.IMOEX_180323_180607_1min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = WINDOW_STEP;
 	const int generate_theta_each_step = 0;
