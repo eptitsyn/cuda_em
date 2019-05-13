@@ -20,9 +20,10 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 10000
+#define MAX_ITERATIONS 300
 #define TOLERANCE 0.01
-#define WINDOW_LENGTH 1040
+#define WINDOW_LENGTH 180
+#define DATA_LENGTH 864
 #define DEBUG 0
 
 static void HandleError(cudaError_t err,
@@ -827,8 +828,8 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = 1100;
-	const char* data_filename = "..//data//data_imoex_180323_180424_5min.txt";
+	const int data_length = DATA_LENGTH;
+	const char* data_filename = "..//data//RI.IMOEX_180323_180607_30min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = 1;
 	const int generate_theta_each_step = 0;
