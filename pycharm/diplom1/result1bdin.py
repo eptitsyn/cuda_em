@@ -102,13 +102,9 @@ plt.scatter(x, mu, s=1)
 plt.show()
 """
 
-f, axarr = plt.subplots(2, sharex=True)
-axarr[0].scatter(x, y, 1, alpha=0.5, c=z, cmap="jet")
-axarr[1].scatter(x, mu, 1, alpha=0.5)
-axarr[0].set(xlabel='Номер окна (n)', ylabel='σ',
-       title='Диффузная составляющая')
-axarr[1].set(xlabel='Номер окна  (n)', ylabel='μ',
-       title='Динамическая составляющая')
+f, axarr = plt.subplots()
+axarr.scatter(x, mu, 1, alpha=0.5)
+axarr.set(xlabel='Номер окна  (n)', ylabel='μ', title='Динамическая составляющая')
 #axarr[2].plot(range(257), vol)
 #axarr[3].plot(range(257), close)
 plt.show()
