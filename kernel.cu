@@ -16,10 +16,9 @@ using namespace std;
 #define M_SQ2PI 2.506628274631000502416
 #define M_SQPId2 1.253314137315500251208
 #define k 10
-#define MAX_ITERATIONS 300
-#define TOLERANCE 0.01
-#define DATA_LENGTH 28080
-#define WINDOW_LENGTH 2600
+#define MAX_ITERATIONS 2000
+#define TOLERANCE 0.000001
+#define WINDOW_LENGTH 1560
 #define WINDOW_STEP 5
 
 static void HandleError(cudaError_t err,
@@ -60,23 +59,25 @@ __device__ double* GetSubData(double* data, int i)
 	return &data[i];
 }
 
-double* readfromfile(const char* DATA_FILENAME, int data_length)
+double* readfromfile(const char* DATA_FILENAME, int *data_length)
 {
+	vector<double> *data = new vector<double>;
+
 	ifstream inFile;
 	inFile.open(DATA_FILENAME);
 	if (!inFile) {
 		cerr << "Unable to open file datafile";
 		exit(1);   // call system to stop
 	}
-	double *data = (double*)malloc(data_length * sizeof(double));
 	double x;
-	for (int i = 0; i < data_length; ++i)
+	while (inFile >> x)
 	{
-		inFile >> x;
-		data[i] = x;
+		(*data).push_back(x);
 	}
 	inFile.close();
-	return data;
+	(*data_length)=(*data).size();
+	double* a = (*data).data();
+	return a;
 };
 
 double std_dev(double* data, int data_length)
@@ -489,7 +490,7 @@ int main()
 {
 	HANDLE_ERROR(cudaDeviceReset());
 	srand(time(NULL));
-	const int data_length = DATA_LENGTH;
+	int data_length = 0;
 	const char* data_filename = "..//data//RI.IMOEX_180323_180607_1min.txt";
 	const int window_length = WINDOW_LENGTH;
 	const int window_step = WINDOW_STEP;
@@ -498,9 +499,11 @@ int main()
 	 * 1 - генерировать нач прибл для всех итераций
 	 * 2 - использовать предыдущий результат как начальное приближение
 	 */
+	double* data = readfromfile(data_filename, &data_length);
+	cout << "data length: " << data_length << endl;
 	const int steps = (data_length - window_length + 1) / window_step;
 
-	double* data = readfromfile(data_filename, data_length);
+
 	double* theta = (double*)malloc(steps * 3 * k * sizeof(double));
 
 	cudaError_t cudaStatus = slsalgorithm(data, data_length, theta, window_length, window_step, generate_theta_each_step);
